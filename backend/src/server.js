@@ -1,0 +1,14 @@
+require('dotenv').config();
+const express=require('express');const cors=require('cors');const pool=require('./db');
+const app=express();const clientOrigins=(process.env.CLIENT_ORIGIN||'http://localhost:3000,http://localhost:3001').split(',').map(origin=>origin.trim()).filter(Boolean);app.use(cors({origin:(origin,callback)=>callback(null,!origin||clientOrigins.includes(origin))}));app.use(express.json({limit:'1mb'}));
+app.get('/',(req,res)=>res.json({name:'Supply Chain Inventory Risk & Demand Analysis API',status:'running'}));
+app.get('/api/health',async(req,res)=>{try{await pool.query('SELECT 1');res.json({success:true,mysql:true});}catch(e){res.status(503).json({success:false,mysql:false,message:e.message});}});
+app.use('/api/auth',require('./routes/auth'));
+app.use('/api/dashboard',require('./routes/dashboard'));
+app.use('/api/analytics',require('./routes/analytics'));
+app.use('/api/data',require('./routes/resources'));
+app.use('/api/manage',require('./routes/productsInventory'));
+app.use('/api/manage',require('./routes/orders'));
+app.use('/api/neo4j',require('./routes/neo4j'));
+app.use((err,req,res,next)=>{console.error(err);res.status(500).json({success:false,message:'Unexpected server error'});});
+const port=Number(process.env.PORT||5000);app.listen(port,()=>console.log(`Supply Chain API running at http://localhost:${port}`));

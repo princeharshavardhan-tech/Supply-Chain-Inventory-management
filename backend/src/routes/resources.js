@@ -1,0 +1,6 @@
+const router=require('express').Router(); const pool=require('../db'); const {authenticate}=require('../auth');
+// Read-only listing endpoints use an explicit allow-list; never interpolate user-provided table names.
+const resources={products:{table:'product',order:'product_name'},inventory:{table:'vw_inventory_status',order:'product_name'},suppliers:{table:'supplier',order:'supplier_name'},warehouses:{table:'warehouse',order:'warehouse_name'},customers:{table:'customer',order:'customer_name'},orders:{table:'vw_sales_order_summary',order:'order_date'},risks:{table:'inventory_risk',order:'detected_date'},transfers:{table:'stock_transfer',order:'transfer_date'}};
+router.get('/:resource',async(req,res)=>{try{const cfg=resources[req.params.resource];if(!cfg)return res.status(404).json({success:false,message:'Unknown resource'});const limit=Math.min(Math.max(parseInt(req.query.limit)||100,1),500);const [rows]=await pool.query(`SELECT * FROM \`${cfg.table}\` ORDER BY \`${cfg.order}\` DESC LIMIT ?`,[limit]);res.json({success:true,data:rows});}catch(e){console.error(e);res.status(500).json({success:false,message:e.message});}});
+router.get('/_meta/resources',authenticate,(req,res)=>res.json({success:true,resources:Object.keys(resources)}));
+module.exports=router;
