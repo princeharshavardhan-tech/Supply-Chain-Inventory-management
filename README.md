@@ -213,5 +213,3 @@ If Neo4j is unavailable, MySQL-backed modules continue to work; graph health and
 Verified in the current environment: MySQL health, dashboard, product/inventory/order reads, demand and risk analytics, Neo4j connectivity/summary/supplier network, backend syntax, frontend lint/build, and 3 auth/role unit tests. The live database reports 96 graph relationships.
 
 For a reviewer-facing explanation of the architecture, schema, data flow, formulas, triggers, and transactions, see [the technical walkthrough](docs/TECHNICAL_WALKTHROUGH.md). Still required for submission: add team names and individual contributions; rotate the setup admin password; and commit from the team's Git repository. Screenshots are saved in `docs/`. The active starter directory is not itself a Git repository, so no commits were created. See [the final report](docs/FINAL_REPORT.md) for the ER diagram and verification evidence.
-#   S u p p l y - C h a i n - I n v e n t o r y - m a n a g e m e n t  
- 
