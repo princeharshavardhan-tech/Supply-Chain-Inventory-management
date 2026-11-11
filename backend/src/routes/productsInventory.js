@@ -5,27 +5,43 @@ const { authenticate, authorize } = require('../auth');
 // Lookup values used by the product form.
 router.get('/lookups', async (_req, res) => {
   try {
-    const [[categories], [uoms]] = await Promise.all([
+    const [[categories], [uoms], [suppliers]] = await Promise.all([
       pool.query('SELECT category_id, category_name FROM category WHERE is_active = TRUE ORDER BY category_name'),
-      pool.query('SELECT uom_id, uom_name FROM uom ORDER BY uom_name')
+      pool.query('SELECT uom_id, uom_name FROM uom ORDER BY uom_name'),
+      pool.query('SELECT supplier_id, supplier_name FROM supplier WHERE is_active = 1 ORDER BY supplier_name')
     ]);
-    res.json({ success: true, categories, uoms });
+    res.json({ success: true, categories, uoms, suppliers });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: 'Could not load product form options' });
   }
 });
 
-// Product list with category and unit names.
+// Product list with category, unit names, and connected preferred supplier details.
 router.get('/products', async (req, res) => {
   try {
     const [rows] = await pool.query(`
       SELECT p.product_id, p.category_id, c.category_name, p.uom_id, u.uom_name,
              p.product_name, p.sku, p.brand, p.barcode, p.unit_price,
-             p.reorder_level, p.created_date, p.discontinued_flag
+             p.reorder_level, p.created_date, p.discontinued_flag,
+             COALESCE(pref_s.supplier_name, 'None') AS preferred_supplier,
+             pref_s.unit_cost AS supplier_unit_cost,
+             pref_s.lead_time_days AS supplier_lead_time_days,
+             COALESCE(sp_agg.supplier_count, 0) AS total_suppliers
       FROM product p
       JOIN category c ON c.category_id = p.category_id
       JOIN uom u ON u.uom_id = p.uom_id
+      LEFT JOIN (
+        SELECT sp.product_id, s.supplier_name, sp.unit_cost, sp.lead_time_days
+        FROM supplier_product sp
+        JOIN supplier s ON s.supplier_id = sp.supplier_id
+        WHERE sp.is_preferred = 1
+      ) pref_s ON pref_s.product_id = p.product_id
+      LEFT JOIN (
+        SELECT product_id, COUNT(*) AS supplier_count
+        FROM supplier_product
+        GROUP BY product_id
+      ) sp_agg ON sp_agg.product_id = p.product_id
       ORDER BY p.product_id DESC LIMIT 500`);
     res.json({ success: true, data: rows });
   } catch (error) {
@@ -34,20 +50,61 @@ router.get('/products', async (req, res) => {
   }
 });
 
+// Get all suppliers connected to a specific product
+router.get('/products/:id/suppliers', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ success: false, message: 'Invalid product ID' });
+  try {
+    const [rows] = await pool.query(`
+      SELECT sp.supplier_product_id, sp.supplier_id, s.supplier_name, s.contact_person,
+             s.email, s.phone_number, s.rating, sp.supplier_product_code,
+             sp.unit_cost, sp.lead_time_days, sp.is_preferred
+      FROM supplier_product sp
+      JOIN supplier s ON s.supplier_id = sp.supplier_id
+      WHERE sp.product_id = ?
+      ORDER BY sp.is_preferred DESC, sp.unit_cost ASC`, [id]);
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Get product suppliers error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 router.post('/products', authenticate, authorize('admin', 'staff'), async (req, res) => {
-  const { category_id, uom_id, product_name, sku, brand, barcode, unit_price, reorder_level } = req.body || {};
+  const { category_id, uom_id, product_name, sku, brand, barcode, unit_price, reorder_level, supplier_id, supplier_unit_cost, supplier_lead_time_days, supplier_product_code } = req.body || {};
   if (!category_id || !uom_id || !product_name?.trim() || !sku?.trim() || unit_price === undefined || Number(unit_price) < 0 || !Number.isInteger(Number(reorder_level)) || Number(reorder_level) < 0) {
     return res.status(400).json({ success: false, message: 'Category, unit, product name, SKU, non-negative price and non-negative reorder level are required.' });
   }
+
+  const conn = await pool.getConnection();
   try {
-    const [result] = await pool.execute(`INSERT INTO product
+    await conn.beginTransaction();
+    const [result] = await conn.execute(`INSERT INTO product
       (category_id, uom_id, product_name, sku, brand, barcode, unit_price, reorder_level)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [Number(category_id), Number(uom_id), product_name.trim(), sku.trim(), brand?.trim() || null, barcode?.trim() || null, Number(unit_price), Number(reorder_level)]);
-    res.status(201).json({ success: true, message: 'Product created', product_id: result.insertId });
+    const productId = result.insertId;
+
+    // If an initial supplier is provided, connect the product to that supplier in supplier_product
+    if (supplier_id && Number(supplier_id) > 0) {
+      const unitCost = Number(supplier_unit_cost || 0);
+      const leadTime = Number(supplier_lead_time_days || 7);
+      const code = supplier_product_code?.trim() || null;
+      await conn.execute(
+        `INSERT INTO supplier_product (supplier_id, product_id, supplier_product_code, unit_cost, lead_time_days, is_preferred)
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        [Number(supplier_id), productId, code, unitCost, leadTime]
+      );
+    }
+
+    await conn.commit();
+    res.status(201).json({ success: true, message: 'Product created and connected successfully.', product_id: productId });
   } catch (error) {
+    await conn.rollback();
     console.error(error);
     res.status(error.code === 'ER_DUP_ENTRY' ? 409 : 400).json({ success: false, message: error.code === 'ER_DUP_ENTRY' ? 'SKU or barcode already exists.' : error.sqlMessage || 'Could not create product.' });
+  } finally {
+    conn.release();
   }
 });
 

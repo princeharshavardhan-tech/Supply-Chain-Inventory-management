@@ -2,43 +2,63 @@
 
 A supply-chain operations dashboard for the PES University DBMS mini project. It uses Next.js for the web app, Express for the API, MySQL for operational and analytical data, and optionally Neo4j for the supplier/product/warehouse graph.
 
+> **Documentation Guides:**
+> - **[Page-by-Page System & Database Explanation](docs/PAGE_BY_PAGE_EXPLANATION.md)**: Dedicated reference explaining exactly what each page does, how to use it, what SQL queries it executes, what triggers/procedures are fired, from where it fetches data, and how changes cascade across other pages and tables.
+> - **[Complete System Architecture Explanation](docs/SYSTEM_EXPLANATION.md)**: Full architecture, schema relationships, and API contract specifications.
+
+---
+
 ## Important
 - Requires the existing project MySQL schema and seed data. This repository does not include the academic schema/seed SQL.
 - **Do not rerun the Review 2 seed SQL**: it contains `TRUNCATE` statements and can erase/reset project records.
 - The app adds only three application-owned tables: `app_users`, `app_managed_orders`, and `app_order_reservations`.
 - Never commit `backend/.env` or `frontend/.env.local`; they contain local credentials/configuration.
 
-## Folder structure
+---
+
+## Folder Structure
 
 ```text
 SupplyChainProject/
 ├── backend/
 │   ├── src/
-│   │   ├── routes/       # auth, dashboard, data, Neo4j health
-│   │   ├── scripts/      # admin account setup
-│   │   ├── auth.js
-│   │   ├── db.js
-│   │   └── server.js
+│   │   ├── routes/       # auth, dashboard, analytics, data, productsInventory, orders, customersSuppliers, neo4j
+│   │   ├── scripts/      # admin account setup (createAdmin.js)
+│   │   ├── auth.js       # JWT authentication & role-based authorization
+│   │   ├── db.js         # MySQL connection pool
+│   │   └── server.js     # Express app entry point
+│   ├── test/             # Unit tests (auth, customers/suppliers) and integration tests
 │   ├── .env.example
 │   └── package.json
 ├── frontend/
-│   ├── src/app/          # Next.js dashboard
-│   ├── package.json
-│   └── .env.local.example
-└── database/app_setup.sql
+│   ├── src/
+│   │   ├── app/          # Next.js dashboard pages and global CSS
+│   │   └── components/   # InventoryControls, OrderControls
+│   ├── .env.local.example
+│   └── package.json
+├── database/
+│   └── app_setup.sql     # Application-owned tables
+└── docs/
+    ├── SYSTEM_EXPLANATION.md   # Deep-dive of each page, API fetch, trigger, and cross-page effects
+    ├── TECHNICAL_WALKTHROUGH.md
+    └── FINAL_REPORT.md
 ```
 
-## 1. Prerequisites and database
+---
 
-- Node.js 20 LTS (20.9 or later) and npm.
+## 1. Prerequisites and Database
+
+- Node.js 20 LTS (or Node.js 24) and npm.
 - MySQL 8, running and containing the project's `supply_chain_db` schema, tables, views, procedures, triggers, and seed records.
 - Neo4j is optional. Only needed for the graph view and MySQL-to-Neo4j synchronization.
 
 Do not use the project seed/reset SQL as part of normal app startup. Confirm the database name and credentials with the project owner. The API health check verifies connectivity but does not create the academic schema.
 
-## 2. Backend setup (Windows PowerShell)
+---
 
-Open a terminal in `SupplyChainProject/backend`:
+## 2. Backend Setup (Windows PowerShell)
+
+Open a terminal in `backend`:
 
 ```powershell
 npm install
@@ -60,18 +80,20 @@ JWT_SECRET=replace_with_a_long_random_secret_at_least_32_chars
 
 Generate a JWT secret, for example with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`, and use the output as `JWT_SECRET`. Replace all example credentials with your own values. Do not commit `.env` or share its contents.
 
-Install the application tables and start the API:
+Install the application tables and create the administrator account:
 
 ```powershell
 npm run create-admin -- admin YOUR_UNIQUE_PASSWORD
 npm run dev
 ```
 
-The bootstrap command creates/updates the admin account and the three application-owned tables. Use a password of at least 10 characters. Command arguments may be saved in shell history; rotate the password before sharing the machine or project. Keep this terminal running. Verify `http://localhost:5000/api/health` returns `{"success":true,"mysql":true}`.
+The bootstrap command creates/updates the admin account and the three application-owned tables. Use a password of at least 10 characters. Keep this terminal running. Verify `http://localhost:5000/api/health` returns `{"success":true,"mysql":true}`.
 
-## 3. Frontend setup
+---
 
-Open a second terminal in `SupplyChainProject/frontend`:
+## 3. Frontend Setup
+
+Open a second terminal in `frontend`:
 
 ```powershell
 npm install
@@ -79,11 +101,11 @@ Copy-Item .env.local.example .env.local
 npm run dev
 ```
 
-`NEXT_PUBLIC_API_URL` is the backend base URL, without a trailing `/api`. The example points to `http://localhost:5000`. Open the URL printed by Next.js, normally `http://localhost:3000`; if that port is busy, Next.js may use `3001`, which is included in the example CORS origins.
+`NEXT_PUBLIC_API_URL` is the backend base URL, without a trailing `/api`. The default points to `http://localhost:5000`. Open the URL printed by Next.js, normally `http://localhost:3000` (or `3001`).
 
-For a different backend port, set `PORT` in `backend/.env`, set the matching `NEXT_PUBLIC_API_URL` in `frontend/.env.local`, and include the frontend origin in `CLIENT_ORIGIN`; then restart both processes. For example, the current workspace has used frontend `3001` with API `5002`.
+---
 
-## 4. Accounts and sign-in
+## 4. Accounts and Sign-In
 
 Sign in on the dashboard using the admin username/password provided to `create-admin`. Passwords are bcrypt-hashed. The login endpoint is `POST http://localhost:5000/api/auth/login` with JSON:
 
@@ -91,89 +113,96 @@ Sign in on the dashboard using the admin username/password provided to `create-a
 {"username":"admin","password":"YOUR_UNIQUE_PASSWORD"}
 ```
 
-The endpoint returns a JWT. Admin and staff roles are enforced by the API. This project has no staff-registration screen or staff-creation CLI; use an administrator account unless a staff account has been provisioned by the team. Product deletion, deleting cancelled app-created orders, and Neo4j synchronization are admin-only.
+The endpoint returns a signed JWT. Admin and staff roles are enforced by the API:
+- **Public (Unauthenticated):** View-only access across all tabs.
+- **Staff:** Add/edit products, add/update inventory, add/edit customers, add/edit suppliers, and create/cancel pending orders.
+- **Admin:** All Staff abilities PLUS product deletion, customer deletion, supplier deletion, cancelled order deletion, and Neo4j synchronization.
 
-## 5. Use the dashboard
+---
 
-- **Overview:** live MySQL totals, recent orders, stock attention, and inventory chart.
-- **Products:** add/edit products; admins can delete unreferenced products. Referenced products should be discontinued instead.
-- **Inventory:** choose **Add inventory**, select a product/warehouse pair without an existing stock row, and enter quantities/thresholds. Use **Update stock** for existing rows. Stock changes run in a transaction and can invoke the stock-risk trigger.
-- **Orders:** choose **New order**, select customer and warehouse first, then choose from products with stock there. The form shows available stock and caps quantity. Order creation reserves stock; cancelling a pending order releases it. Admin deletion of a cancelled order is optional. Historical seeded orders remain view-only.
-- **Risk analysis** and **Demand analysis:** read the existing MySQL risk/history/forecast data.
-- **Graph database:** optional. Check connection, then admins can sync MySQL data to Neo4j.
+## 5. Use the Dashboard
 
-Required dates cannot be earlier than today. If stock changes after the form loads, the API rechecks within a transaction and may reject the order with an insufficient-stock message; refresh and choose a lower quantity.
+- **Overview:** Live MySQL totals, recent orders, stock attention list, and inventory snapshot chart.
+- **Products:** Add and edit products; search across all product attributes. Admins can delete unreferenced products.
+- **Inventory:** Add new stock records (automatically prevents duplicate product/warehouse pairs) and update stock levels. Adjustments trigger the `auto_stockout_risk` MySQL trigger.
+- **Customers:** Add and edit customers with email and customer-type validation; search customers by name, phone, email, or type. Newly added customers immediately appear in the **New order** modal customer dropdown.
+- **Suppliers:** Add and edit suppliers with rating validation (0-5); search suppliers by name, contact person, or address.
+- **Orders:** Search orders by Order ID (`#101`), Customer, Warehouse, Date, Status, or Amount. Click **New order** to choose customer, warehouse, and products with available stock; order creation automatically reserves inventory. Staff/Admin can cancel pending orders to release reservations.
+- **Warehouses:** View and search storage facilities and distribution centers.
+- **Risk Analysis:** View and search stockout risk records created automatically by MySQL database triggers.
+- **Demand Analysis:** Analytics reporting showing historical vs forecasted demand by product and demand trends.
+- **Graph Database:** Check Neo4j connectivity and synchronize MySQL entities (Suppliers, Products, Warehouses, Relationships) to Neo4j.
+
+---
+
+## Search Functionality
+
+The search engine performs **value-based matching**:
+- Checks only table cell values, ignoring JSON schema keys so typing letters (`a`, `p`, `c`) or words (`name`, `status`) filters records accurately.
+- Supports multi-word matching (e.g. `"Milk Dairy"` or `"Aarav Wholesale"`).
+- Search is available on all operational tables (`Products`, `Inventory`, `Customers`, `Suppliers`, `Orders`, `Warehouses`, `Risk analysis`) and cleanly removed from analytical/system panels (`Overview`, `Demand analysis`, `Graph database`).
+
+---
 
 ## API Reference
 
-- `GET /api/health` — MySQL health check
-- `POST /api/auth/login` — application login
-- `GET /api/dashboard/stats` — dashboard KPIs, recent orders, inventory attention list
-- `GET /api/data/products`
-- `GET /api/data/inventory`
-- `GET /api/data/suppliers`
-- `GET /api/data/warehouses`
-- `GET /api/data/customers`
-- `GET /api/data/orders`
-- `GET /api/data/risks`
-- `GET /api/data/transfers`
-- `GET /api/manage/products` and `GET /api/manage/inventory`
-- `POST/PUT/DELETE /api/manage/products` (JWT; delete admin-only)
-- `POST /api/manage/inventory` (JWT; create stock record)
-- `PATCH /api/manage/inventory/:id` (JWT)
-- `GET /api/manage/order-lookups` and `POST /api/manage/orders` (JWT; create pending order and reserve stock)
-- `POST /api/manage/orders/:id/cancel` (JWT; pending orders only, releases reserved stock)
-- `DELETE /api/manage/orders/:id` (JWT; admin-only, cancelled orders only)
-- `GET /api/manage/lookups`
-- `GET /api/neo4j/health` — optional Neo4j connectivity check
-- `POST /api/neo4j/sync` — admin-only MySQL-to-Neo4j synchronization; creates uniqueness constraints as part of the sync
+### Health & Auth
+- `GET /api/health` — MySQL connectivity check
+- `POST /api/auth/login` — Application sign-in, returns JWT token
 
-List endpoints accept `?limit=100` (maximum 500).
+### Dashboard & Analytics
+- `GET /api/dashboard/stats` — Dashboard KPI stats, recent orders, inventory attention list
+- `GET /api/analytics/demand` — Demand history, forecasts, and product summary
+- `GET /api/analytics/risk-summary` — Inventory risk counts and risk records
 
-## Optional Neo4j Setup
+### Product & Inventory Management
+- `GET /api/manage/lookups` — Active categories and units of measure
+- `GET /api/manage/products` — Product list
+- `POST /api/manage/products` — Create product (Staff/Admin JWT)
+- `PUT /api/manage/products/:id` — Update product (Staff/Admin JWT)
+- `DELETE /api/manage/products/:id` — Delete product (Admin JWT)
+- `GET /api/manage/inventory-lookups` — Products, warehouses, and existing pairs
+- `GET /api/manage/inventory` — Inventory list with calculated available stock
+- `POST /api/manage/inventory` — Create inventory record (Staff/Admin JWT)
+- `PATCH /api/manage/inventory/:id` — Update stock levels (Staff/Admin JWT; fires risk trigger)
 
-Install and start Neo4j Desktop/Server, create a database, then configure the following in `backend/.env` using your own local credentials:
+### Customer & Supplier Management
+- `GET /api/manage/customers` — Customer list (most recent first)
+- `POST /api/manage/customers` — Create customer (Staff/Admin JWT)
+- `PUT /api/manage/customers/:id` — Update customer (Staff/Admin JWT)
+- `DELETE /api/manage/customers/:id` — Delete customer (Admin JWT; blocks if orders exist)
+- `GET /api/manage/suppliers` — Supplier list (most recent first)
+- `POST /api/manage/suppliers` — Create supplier (Staff/Admin JWT)
+- `PUT /api/manage/suppliers/:id` — Update supplier (Staff/Admin JWT)
+- `DELETE /api/manage/suppliers/:id` — Delete supplier (Admin JWT; blocks if referenced)
 
-```env
-NEO4J_URI=neo4j://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=YOUR_NEO4J_PASSWORD
-NEO4J_DATABASE=neo4j
+### Orders Management
+- `GET /api/manage/orders` — Sales orders with app-managed indicator
+- `GET /api/manage/order-lookups` — Customers, warehouses, products, and available stock
+- `POST /api/manage/orders` — Create pending order and reserve inventory (Staff/Admin JWT)
+- `POST /api/manage/orders/:id/cancel` — Cancel pending order and release reserved stock (Staff/Admin JWT)
+- `DELETE /api/manage/orders/:id` — Delete cancelled order (Admin JWT)
+
+### Read-Only Project Resources
+- `GET /api/data/:resource` — Generic listing (`warehouses`, `transfers`, etc.)
+
+### Neo4j Graph
+- `GET /api/neo4j/health` — Neo4j connection check
+- `GET /api/neo4j/summary` — Graph node and relationship counts
+- `GET /api/neo4j/supplier-network` — Graph network data
+- `POST /api/neo4j/sync` — Synchronize MySQL data to Neo4j (Admin JWT)
+
+---
+
+## Testing
+
+Run unit tests (auth and customer/supplier validation):
+```powershell
+cd backend
+npm test
 ```
 
-Restart the backend and open `http://localhost:5000/api/neo4j/health`. Sign in as an administrator and use **Graph database → Sync MySQL → Neo4j**. The sync creates uniqueness constraints and synchronizes the MySQL supplier, product, warehouse, supplier-product, and inventory data. Never commit or share the real Neo4j password.
-
-## Detailed Product and Inventory Routes
-
-- `GET /api/manage/lookups` returns active categories and units for the product form.
-- `GET /api/manage/products` lists products with category and unit names.
-- `POST /api/manage/products` creates a product (admin/staff JWT required).
-- `PUT /api/manage/products/:id` updates a product (admin/staff JWT required).
-- `DELETE /api/manage/products/:id` deletes a product (admin JWT required). Products referenced by inventory or orders are protected by foreign keys; discontinue them instead.
-- `GET /api/manage/inventory` lists stock by product and warehouse.
-- `PATCH /api/manage/inventory/:id` adjusts stock (admin/staff JWT required). The API validates quantities and commits the update in a transaction. The existing `auto_stockout_risk` trigger evaluates the updated inventory.
-- `POST /api/manage/inventory` adds a product/warehouse stock record (admin/staff JWT required). Duplicate product/warehouse pairs and invalid stock quantities are rejected.
-
-The frontend includes product listing/search, product add/edit, admin-only delete, inventory listing/create/adjustment, and order create/cancel controls. Use the admin account created in [Accounts and sign-in](#4-accounts-and-sign-in). Do not rerun the seed SQL.
-
-## Sales Order Workflow
-
-- Admin/staff can create a `Pending` order with one or more products. After choosing a warehouse, the form shows available stock for each product and caps quantity at that amount. The API locks inventory rows, revalidates availability, inserts order lines, and reserves stock within a transaction.
-- Required dates must be today or later; the form prevents past dates and the API returns a clear validation error before the database constraint is reached.
-- The database `check_stock_before_order` trigger independently rejects an order line that exceeds available stock.
-- Admin/staff can cancel a pending order; cancellation releases its reservations in a transaction.
-- Only admins can delete cancelled orders. Confirmed, shipped, and delivered orders cannot be edited or deleted by this workflow.
-- The Add Inventory form filters out product/warehouse pairs that already have a stock record; the API still rejects duplicates if the data changes concurrently.
-- Order create/cancel/delete and stock reservation were integration-tested using temporary rows; all fixtures were removed afterward.
-
-## Test and Verification
-
-Implemented: authenticated dashboard login, admin/staff JWT middleware, product create/update and admin-only delete, transactional inventory updates, pending sales-order creation/cancellation and admin deletion of cancelled orders, demand/risk APIs, Neo4j health/summary/network and admin synchronization, and a responsive Next.js dashboard.
-
-The verification snapshot from 2026-11-02 found 18 project tables plus 3 application tables (`app_users`, `app_managed_orders`, and `app_order_reservations`), 2 views, 2 stored procedures, 2 triggers, and 25 project foreign-key relationships. Counts will change as project data changes.
-
-`npm test` runs auth/role middleware unit tests. To run the complete suite against the configured MySQL database and a running API:
-
+Build the frontend to verify types and compilation:
 ```powershell
 $env:ALLOW_DB_INTEGRATION_TESTS='true'
 $env:API_BASE_URL='http://localhost:5000'
@@ -213,3 +242,6 @@ If Neo4j is unavailable, MySQL-backed modules continue to work; graph health and
 Verified in the current environment: MySQL health, dashboard, product/inventory/order reads, demand and risk analytics, Neo4j connectivity/summary/supplier network, backend syntax, frontend lint/build, and 3 auth/role unit tests. The live database reports 96 graph relationships.
 
 For a reviewer-facing explanation of the architecture, schema, data flow, formulas, triggers, and transactions, see [the technical walkthrough](docs/TECHNICAL_WALKTHROUGH.md). Still required for submission: add team names and individual contributions; rotate the setup admin password; and commit from the team's Git repository. Screenshots are saved in `docs/`. The active starter directory is not itself a Git repository, so no commits were created. See [the final report](docs/FINAL_REPORT.md) for the ER diagram and verification evidence.
+#   S u p p l y - C h a i n - I n v e n t o r y - m a n a g e m e n t 
+ 
+ 

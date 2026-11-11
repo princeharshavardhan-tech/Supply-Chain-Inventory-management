@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Plus, Save, Trash2, X } from 'lucide-react';
 
 type Customer = { customer_id: number; customer_name: string };
@@ -158,18 +158,46 @@ export function OrderRowActions({ api, token, role, orderId, status, managed, on
 }
 
 export function OrderManagement({ api, token, role, orders, onChanged, onNotice }: OrderManagementProps) {
+  const [search, setSearch] = useState('');
+  const filteredOrders = useMemo(() => {
+    const list = Array.isArray(orders) ? orders : [];
+    const query = search.trim().toLowerCase();
+    if (!query) return list;
+    const terms = query.split(/\s+/).filter(Boolean);
+    return list.filter(order => {
+      if (!order || typeof order !== 'object') return false;
+      return terms.every(term => {
+        if (term.startsWith('#') && `#${order.so_id}`.toLowerCase().includes(term)) return true;
+        return Object.values(order).some(val => {
+          if (val === null || val === undefined) return false;
+          return String(val).toLowerCase().includes(term);
+        });
+      });
+    });
+  }, [orders, search]);
+
   return <section className="panel">
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
       <h2>Sales orders</h2>
-      <OrderCreateButton api={api} token={token} onChanged={onChanged} onNotice={onNotice}/>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          className="search"
+          placeholder="Search orders by customer, status, ID…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <OrderCreateButton api={api} token={token} onChanged={onChanged} onNotice={onNotice}/>
+      </div>
     </div>
     <div className="tablewrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Warehouse</th><th>Date</th><th>Status</th><th>Amount</th><th>Actions</th></tr></thead>
-      <tbody>{orders.map((order, index) => <tr key={order.so_id ?? `order-${index}`}>
+      <tbody>{filteredOrders.map((order, index) => <tr key={order.so_id ?? `order-${index}`}>
         <td>#{order.so_id}</td><td>{order.customer_name}</td><td>{order.warehouse_name}</td><td>{order.order_date}</td>
-        <td>{order.status}</td><td>{Number(order.total_amount || 0).toLocaleString('en-IN')}</td>
+        <td><span className={`pill ${order.status}`}>{order.status}</span></td><td>₹{Number(order.total_amount || 0).toLocaleString('en-IN')}</td>
         <td><OrderRowActions api={api} token={token} role={role} orderId={Number(order.so_id)} status={order.status} managed={Boolean(order.managed)} onChanged={onChanged} onNotice={onNotice}/></td>
       </tr>)}</tbody>
-    </table></div>
+    </table>
+    {!filteredOrders.length && <p className="muted" style={{ padding: '12px 16px' }}>{search ? `No orders matching "${search}".` : 'No orders found.'}</p>}
+    </div>
     {!token && <p className="muted">Log in as staff or admin to create and cancel pending orders.</p>}
     <p className="muted">Historical orders are view-only. Deleting is optional; only admins can delete cancelled orders created in this app.</p>
   </section>;

@@ -9,6 +9,8 @@ app.use('/api/analytics',require('./routes/analytics'));
 app.use('/api/data',require('./routes/resources'));
 app.use('/api/manage',require('./routes/productsInventory'));
 app.use('/api/manage',require('./routes/orders'));
+app.use('/api/manage',require('./routes/customersSuppliers'));
+app.use('/api/manage',require('./routes/purchaseOrders'));
 app.use('/api/neo4j',require('./routes/neo4j'));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).json({success:false,message:'Unexpected server error'});});
 const port=Number(process.env.PORT||5000);app.listen(port,()=>console.log(`Supply Chain API running at http://localhost:${port}`));
